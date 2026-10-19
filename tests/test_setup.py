@@ -21,6 +21,11 @@ def sh(*cmd, cwd=None, env=None, check=True, stdin=None):
     return subprocess.run(cmd, cwd=cwd, env=env, check=check, capture_output=True, text=True, stdin=stdin)
 
 
+def read(path):
+    with open(path) as fh:
+        return fh.read()
+
+
 def write(root, path, text):
     full = os.path.join(root, path)
     os.makedirs(os.path.dirname(full), exist_ok=True)
@@ -65,8 +70,8 @@ class SetupTest(unittest.TestCase):
     def test_installs_into_the_folder_without_a_git_folder(self):
         result = self.setup()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(open(os.path.join(self.amos, "AGENTS.md")).read(), "agents\n")
-        self.assertEqual(open(os.path.join(self.amos, "notes.md")).read(), "mine\n")  # untouched
+        self.assertEqual(read(os.path.join(self.amos, "AGENTS.md")), "agents\n")
+        self.assertEqual(read(os.path.join(self.amos, "notes.md")), "mine\n")  # untouched
         self.assertFalse(os.path.exists(os.path.join(self.amos, ".git")))
         self.assertNotEqual(sh("git", "rev-parse", "--git-dir", cwd=self.amos, env=self.env, check=False).returncode, 0)
         self.assertEqual(self.store("config", "core.worktree"), "../..")
@@ -76,6 +81,15 @@ class SetupTest(unittest.TestCase):
         self.assertIn(f"install ran in {self.amos}", result.stdout)
         self.assertIn("setup: done.", result.stdout)
         self.assertEqual(self.leftovers(), [])
+
+    def test_installs_main_even_when_the_default_branch_is_another(self):
+        remote = os.path.join(self.env["AMOS_GIT_BASE"], "amos-workspace.git")
+        sh("git", "--git-dir", remote, "branch", "dev", "main", env=self.env)
+        sh("git", "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/dev", env=self.env)
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.store("symbolic-ref", "--short", "HEAD"), "main")
+        self.assertEqual(self.store("rev-parse", "--abbrev-ref", "main@{upstream}"), "origin/main")
 
     def test_runs_from_a_pipe_and_with_the_folder_named(self):
         with open(SETUP) as script:
@@ -90,7 +104,7 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("  .claude/skills/x/SKILL.md\n  AGENTS.md\n", result.stderr)
         self.assertIn("nothing was changed", result.stderr)
-        self.assertEqual(open(os.path.join(self.amos, "AGENTS.md")).read(), "old\n")
+        self.assertEqual(read(os.path.join(self.amos, "AGENTS.md")), "old\n")
         self.assertFalse(os.path.exists(os.path.join(self.amos, ".amos-workspace")))
         self.assertEqual(self.leftovers(), [])
 
@@ -118,6 +132,62 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("not installing into", result.stderr)
         self.assertEqual(os.listdir(self.env["HOME"]), [])
+
+    def test_repos_already_in_the_folder_keep_their_own_git(self):
+        connect = os.path.join(self.amos, "amos-connect")
+        sh("git", "init", "-q", "-b", "dev", cwd=connect, env=self.env)
+        write(connect, "app.py", "x = 1\n")
+        sh("git", "add", "-A", cwd=connect, env=self.env)
+        sh("git", "commit", "-q", "-m", "connect", cwd=connect, env=self.env)
+        write(connect, "app.py", "x = 2\n")  # uncommitted work
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(sh("git", "rev-parse", "--show-toplevel", cwd=connect, env=self.env).stdout.strip(), connect)
+        self.assertEqual(sh("git", "status", "--porcelain", cwd=connect, env=self.env).stdout, " M app.py\n")
+        self.assertEqual(sh("git", "branch", "--show-current", cwd=connect, env=self.env).stdout.strip(), "dev")
+        # The workspace's git never sees inside the repo, and the repo's git never sees the workspace.
+        self.assertEqual(self.store("status", "--porcelain", "--untracked-files=no"), "")
+        self.assertEqual(sh("git", "ls-files", cwd=connect, env=self.env).stdout, "app.py\n")
+
+    def test_refuses_a_maintainer_clone_of_the_workspace_and_changes_nothing(self):
+        os.rmdir(os.path.join(self.amos, "amos-connect"))
+        os.remove(os.path.join(self.amos, "notes.md"))
+        os.rmdir(self.amos)
+        sh("git", "clone", "-q", os.path.join(self.env["AMOS_GIT_BASE"], "amos-workspace.git"), self.amos,
+           env=self.env)
+        head = sh("git", "rev-parse", "HEAD", cwd=self.amos, env=self.env).stdout
+        before = sorted(os.listdir(self.amos))
+        result = self.setup()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is a git checkout (it has .git). If it's amos-workspace, it's already installed", result.stderr)
+        self.assertNotIn("install ran", result.stdout)
+        self.assertEqual(sorted(os.listdir(self.amos)), before)
+        self.assertFalse(os.path.exists(os.path.join(self.amos, ".amos-workspace", "store.git")))
+        self.assertEqual(sh("git", "rev-parse", "HEAD", cwd=self.amos, env=self.env).stdout, head)
+
+    def test_refuses_a_git_file_and_a_folder_that_is_some_other_repo(self):
+        write(self.amos, ".git", "gitdir: /somewhere/else\n")  # a worktree or submodule checkout
+        result = self.setup()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is a git checkout", result.stderr)
+        self.assertEqual(read(os.path.join(self.amos, ".git")), "gitdir: /somewhere/else\n")
+
+        result = self.setup(os.path.join(self.amos, "amos-connect"))  # a plain folder: still fine
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_maintainer_clone_switched_to_the_setup_layout_is_then_just_installed(self):
+        os.rmdir(os.path.join(self.amos, "amos-connect"))
+        os.remove(os.path.join(self.amos, "notes.md"))
+        os.rmdir(self.amos)
+        sh("git", "clone", "-q", os.path.join(self.env["AMOS_GIT_BASE"], "amos-workspace.git"), self.amos,
+           env=self.env)
+        # The switch in docs/amos-workspace.md, "How amos/ holds the workspace".
+        os.rename(os.path.join(self.amos, ".git"), os.path.join(self.amos, ".amos-workspace", "store.git"))
+        self.store("config", "core.worktree", "../..")
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("already set up", result.stdout)
+        self.assertEqual(self.store("status", "--porcelain", "--untracked-files=no"), "")
 
     def test_failed_clone_leaves_nothing_behind(self):
         result = self.setup(env={"AMOS_GIT_BASE": os.path.join(self.tmp.name, "nowhere")})

@@ -1,0 +1,23 @@
+# Runs setup.sh's tests and shellcheck on every PR and push to main. The "Test" job
+# is a required check on main (.github/rulesets/checks.json): keep the job name, or
+# update the ruleset with it.
+name: Installer
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: shellcheck
+        run: shellcheck setup.sh
+      - name: Tests
+        run: python3 -m unittest -v tests/test_setup.py

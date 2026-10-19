@@ -68,7 +68,9 @@ main() {
   local tmp="$SCRATCH"
 
   echo "setup: cloning $base/amos-workspace.git"
-  git clone -q --no-checkout --separate-git-dir="$tmp/store.git" "$base/amos-workspace.git" "$tmp/checkout" ||
+  # main by name, whatever the repo's default branch: main is the released workspace,
+  # and the only branch install.sh pulls for developers.
+  git clone -q --branch main --no-checkout --separate-git-dir="$tmp/store.git" "$base/amos-workspace.git" "$tmp/checkout" ||
     fail "could not clone $base/amos-workspace.git (see above); $SSH_HINT."
 
   # List every clash, not only the first one git would stop at.
