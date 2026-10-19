@@ -108,6 +108,61 @@ class SetupTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.amos, ".amos-workspace")))
         self.assertEqual(self.leftovers(), [])
 
+    def backups(self):
+        return [n for n in os.listdir(self.amos) if n.startswith(".amos-workspace-backup-")]
+
+    def test_old_untracked_skills_rules_and_commands_are_backed_up(self):
+        write(self.amos, ".claude/skills/compliance-check/SKILL.md", "old skill\n")
+        write(self.amos, ".claude/skills/x/extra.md", "extra in a tracked skill\n")
+        write(self.amos, ".cursor/rules/old.mdc", "old rule\n")
+        write(self.amos, ".cursor/commands/old.md", "old command\n")
+        write(self.amos, ".cursor/skills/old/SKILL.md", "old cursor skill\n")
+        write(self.amos, ".cursor/hooks.json", "{}\n")  # not in a skills/rules folder: left alone
+        os.symlink("nowhere", os.path.join(self.amos, ".claude/skills/dangling"))
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        backup = os.path.join(self.amos, backups[0])
+        for path, text in [(".claude/skills/compliance-check/SKILL.md", "old skill\n"),
+                           (".claude/skills/x/extra.md", "extra in a tracked skill\n"),
+                           (".cursor/rules/old.mdc", "old rule\n"),
+                           (".cursor/commands/old.md", "old command\n"),
+                           (".cursor/skills/old/SKILL.md", "old cursor skill\n")]:
+            self.assertEqual(read(os.path.join(backup, path)), text)
+            self.assertFalse(os.path.exists(os.path.join(self.amos, path)), path)
+        self.assertTrue(os.path.islink(os.path.join(backup, ".claude/skills/dangling")))
+        self.assertFalse(os.path.lexists(os.path.join(self.amos, ".claude/skills/dangling")))
+        self.assertFalse(os.path.exists(os.path.join(self.amos, ".claude/skills/compliance-check")))
+        self.assertEqual(read(os.path.join(self.amos, ".claude/skills/x/SKILL.md")), "skill\n")  # workspace's
+        self.assertEqual(read(os.path.join(self.amos, ".cursor/hooks.json")), "{}\n")
+        self.assertIn("moved 6 old skill, rule or command file(s)", result.stdout)
+        self.assertIn(backups[0], result.stdout)
+        self.assertEqual(self.store("status", "--porcelain", "--untracked-files=no"), "")
+
+    def test_no_backup_when_nothing_is_stale(self):
+        write(self.amos, ".claude/settings.local.json", "{}\n")
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.backups(), [])
+        self.assertNotIn("moved", result.stdout)
+        self.assertEqual(read(os.path.join(self.amos, ".claude/settings.local.json")), "{}\n")
+
+    def test_nothing_is_backed_up_when_setup_stops_on_a_clash(self):
+        write(self.amos, "AGENTS.md", "old\n")
+        write(self.amos, ".cursor/rules/old.mdc", "old rule\n")
+        self.assertEqual(self.setup().returncode, 1)
+        self.assertEqual(self.backups(), [])
+        self.assertEqual(read(os.path.join(self.amos, ".cursor/rules/old.mdc")), "old rule\n")
+
+    def test_second_run_does_not_back_up_again(self):
+        self.setup()
+        write(self.amos, ".cursor/rules/later.mdc", "added after setup\n")
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.backups(), [])
+        self.assertEqual(read(os.path.join(self.amos, ".cursor/rules/later.mdc")), "added after setup\n")
+
     def test_second_run_only_runs_install(self):
         self.setup()
         result = self.setup()

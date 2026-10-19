@@ -10,6 +10,9 @@
 # git data goes in .amos-workspace/store.git instead of .git, so the folder isn't a git repo
 # and git there only ever finds your Amos repos. It never overwrites a file: if any workspace
 # file already exists in the folder, it lists them all and stops, having changed nothing.
+# Old copies of the Amos skills and rules (from the earlier distribute.sh) that the workspace
+# doesn't track would sit beside the new ones and contradict them, so it moves those into a
+# timestamped backup folder, and says so.
 # Then it runs .amos-workspace/scripts/install.sh, which clones the Amos repos and installs
 # the checks, and from then on keeps amos-workspace up to date.
 #
@@ -28,6 +31,40 @@ trap '[ -z "$SCRATCH" ] || rm -rf "$SCRATCH"' EXIT
 fail() {
   printf 'setup: ERROR: %s\n' "$1" >&2
   exit 1
+}
+
+# Folders the AI tools load every file from. Untracked files in them are old copies.
+STALE_DIRS=(.claude/skills .cursor/rules .cursor/commands .cursor/skills)
+
+# back_up_stale <target> <store>: move files in STALE_DIRS that the workspace doesn't track into
+# a backup folder, keeping their paths, and say what moved.
+back_up_stale() {
+  local target="$1" store="$2" dir file backup="" count=0 tracked
+  tracked="$(git --git-dir="$store" -c core.quotepath=off ls-tree -r --name-only HEAD)"
+  for dir in "${STALE_DIRS[@]}"; do
+    [ -d "$target/$dir" ] || continue
+    while IFS= read -r -d '' file; do
+      file="${file#"$target"/}"
+      if printf '%s\n' "$tracked" | grep -Fxq -- "$file"; then
+        continue
+      fi
+      if [ -z "$backup" ]; then
+        backup="$target/.amos-workspace-backup-$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$backup"
+      fi
+      mkdir -p "$backup/$(dirname "$file")"
+      mv "$target/$file" "$backup/$file"
+      count=$((count + 1))
+    done < <(find "$target/$dir" \( -type f -o -type l \) -print0)
+    # Leave no empty folders behind where old skills were.
+    find "$target/$dir" -mindepth 1 -depth -type d -empty -delete
+  done
+  if [ "$count" -gt 0 ]; then
+    echo "setup: moved $count old skill, rule or command file(s) that amos-workspace doesn't use into"
+    echo "setup:   $backup"
+    echo "setup: they would have contradicted the new rules. Move one back if you wrote it yourself."
+    echo
+  fi
 }
 
 run_install() {
@@ -95,6 +132,7 @@ If they are old copies of the Amos rules or skills, delete them: the workspace r
   git --git-dir="$target/$STORE" config core.worktree ../..
   echo "setup: amos-workspace $(git --git-dir="$target/$STORE" rev-parse --short HEAD) is in $target"
   echo
+  back_up_stale "$target" "$target/$STORE"
 
   run_install "$target" || {
     echo
