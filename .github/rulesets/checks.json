@@ -1,0 +1,34 @@
+{
+  "name": "Installer Checks",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [
+    {
+      "actor_id": 1367887,
+      "actor_type": "User",
+      "bypass_mode": "pull_request"
+    }
+  ],
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "do_not_enforce_on_create": true,
+        "required_status_checks": [
+          {
+            "context": "Test"
+          }
+        ],
+        "strict_required_status_checks_policy": false
+      }
+    }
+  ]
+}
