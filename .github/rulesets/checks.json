@@ -2,13 +2,7 @@
   "name": "Installer Checks",
   "target": "branch",
   "enforcement": "active",
-  "bypass_actors": [
-    {
-      "actor_id": 1367887,
-      "actor_type": "User",
-      "bypass_mode": "pull_request"
-    }
-  ],
+  "bypass_actors": [],
   "conditions": {
     "ref_name": {
       "include": [
