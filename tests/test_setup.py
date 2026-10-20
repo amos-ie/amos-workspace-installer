@@ -45,14 +45,26 @@ class SetupTest(unittest.TestCase):
         write(src, "AGENTS.md", "agents\n")
         write(src, ".claude/skills/x/SKILL.md", "skill\n")
         write(src, ".amos-workspace/scripts/install.sh", FAKE_INSTALL)
+        write(src, ".amos-workspace/repo-files/ruff.toml", 'required-version = "==0.16.10"\n')
+        write(src, ".amos-workspace/repo-files/dot-amos/gitleaks.toml", '# min-version = "8.19.1"\n')
         os.chmod(os.path.join(src, ".amos-workspace/scripts/install.sh"), 0o755)
         sh("git", "init", "-q", "-b", "main", cwd=src, env=self.env)
         sh("git", "add", "-A", cwd=src, env=self.env)
         sh("git", "commit", "-q", "-m", "ws", cwd=src, env=self.env)
         sh("git", "clone", "-q", "--bare", src, os.path.join(t, "remotes", "amos-workspace.git"), env=self.env)
+        # Stand-ins for the tools, first on the PATH, so the tests don't depend on what is installed.
+        self.bin = os.path.join(t, "bin")
+        self.env["PATH"] = self.bin + os.pathsep + os.environ["PATH"]
+        self.tool("ruff", "ruff 0.16.10")
+        self.tool("gitleaks", "v8.19.1")
         self.amos = os.path.join(t, "amos")
         os.makedirs(os.path.join(self.amos, "amos-connect"))
         write(self.amos, "notes.md", "mine\n")
+
+    def tool(self, name, version=None, exit_code=0):
+        """Install a fake `name` that prints `version` (a tool that is missing: exit_code 127, no output)."""
+        write(self.bin, name, f'#!/bin/sh\n[ -z "{version or ""}" ] || echo "{version or ""}"\nexit {exit_code}\n')
+        os.chmod(os.path.join(self.bin, name), 0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -264,6 +276,74 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("needs the errors above fixed", result.stderr)
         self.assertTrue(os.path.isdir(os.path.join(self.amos, ".amos-workspace", "store.git")))
+
+    def assert_untouched(self):
+        self.assertEqual(sorted(os.listdir(self.amos)), ["amos-connect", "notes.md"])
+
+    def test_missing_tools_stop_setup_before_it_changes_anything(self):
+        self.tool("ruff", exit_code=127)
+        self.tool("gitleaks", exit_code=127)
+        result = self.setup()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Ruff (the Python linter) is not installed. Version 0.16.10 is needed", result.stderr)
+        self.assertIn("pipx install --force ruff==0.16.10", result.stderr)
+        self.assertIn("gitleaks (the secret scanner) is not installed. Version 8.19.1 or later is needed", result.stderr)
+        self.assertIn("run the same setup command again", result.stderr)
+        self.assertNotIn("install ran", result.stdout)
+        self.assert_untouched()
+
+    def test_old_tools_say_what_you_have_and_what_is_needed(self):
+        self.tool("ruff", "ruff 0.15.0")
+        self.tool("gitleaks", "v8.10.0")
+        result = self.setup()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Ruff 0.16.10 is needed, but you have 0.15.0", result.stderr)
+        self.assertIn("gitleaks 8.19.1 or later is needed, but you have 8.10.0", result.stderr)
+        self.assert_untouched()
+
+    def test_newer_gitleaks_and_the_exact_ruff_are_accepted(self):
+        self.tool("gitleaks", "v8.30.1")
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_newer_ruff_is_not_accepted(self):
+        self.tool("ruff", "ruff 0.17.0")
+        result = self.setup()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("you have 0.17.0", result.stderr)
+
+    def test_commands_fit_the_machine(self):
+        self.tool("ruff", exit_code=127)
+        self.tool("gitleaks", exit_code=127)
+        self.tool("brew", exit_code=1)  # brew exists, and has nothing installed
+        result = self.setup()
+        self.assertIn("brew install pipx && pipx ensurepath", result.stderr)
+        self.assertIn("brew install gitleaks", result.stderr)
+        self.tool("pipx")  # pipx exists too: no step to install it
+        result = self.setup()
+        self.assertNotIn("ensurepath", result.stderr)
+        self.assertIn("pipx install --force ruff==0.16.10", result.stderr)
+
+    def test_old_brew_gitleaks_is_upgraded_and_a_brew_ruff_removed_first(self):
+        self.tool("ruff", "ruff 0.15.0")
+        self.tool("gitleaks", "v8.10.0")
+        self.tool("brew")  # `brew list` succeeds: both came from brew
+        self.tool("pipx")
+        result = self.setup()
+        self.assertIn("brew upgrade gitleaks", result.stderr)
+        self.assertLess(result.stderr.index("brew uninstall ruff"), result.stderr.index("pipx install --force"))
+
+    def test_a_workspace_that_names_no_versions_checks_nothing(self):
+        remote = os.path.join(self.env["AMOS_GIT_BASE"], "amos-workspace.git")
+        work = os.path.join(self.tmp.name, "edit")
+        sh("git", "clone", "-q", remote, work, env=self.env)
+        sh("git", "rm", "-q", "-r", ".amos-workspace/repo-files", cwd=work, env=self.env)
+        sh("git", "commit", "-q", "-m", "drop", cwd=work, env=self.env)
+        sh("git", "push", "-q", "origin", "main", cwd=work, env=self.env)
+        self.tool("ruff", exit_code=127)
+        self.tool("gitleaks", exit_code=127)
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
