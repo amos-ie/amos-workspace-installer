@@ -45,7 +45,7 @@ back_up_stale() {
     [ -d "$target/$dir" ] || continue
     while IFS= read -r -d '' file; do
       file="${file#"$target"/}"
-      if printf '%s\n' "$tracked" | grep -Fxq -- "$file"; then
+      if grep -Fxq -- "$file" <<<"$tracked"; then
         continue
       fi
       if [ -z "$backup" ]; then
@@ -124,6 +124,9 @@ Move them out of the way (for example into ~/amos-backup), then run setup again.
 If they are old copies of the Amos rules or skills, delete them: the workspace replaces them."
   fi
 
+  # Before the checkout, so a failure here leaves nothing half-installed: a rerun starts clean.
+  back_up_stale "$target" "$tmp/store.git"
+
   # read-tree refuses to overwrite a file, so nothing is lost if one appeared since the check.
   git --git-dir="$tmp/store.git" config core.worktree "$target"
   git --git-dir="$tmp/store.git" read-tree -m -u HEAD || fail "could not check out amos-workspace (see above)."
@@ -132,7 +135,6 @@ If they are old copies of the Amos rules or skills, delete them: the workspace r
   git --git-dir="$target/$STORE" config core.worktree ../..
   echo "setup: amos-workspace $(git --git-dir="$target/$STORE" rev-parse --short HEAD) is in $target"
   echo
-  back_up_stale "$target" "$target/$STORE"
 
   run_install "$target" || {
     echo
