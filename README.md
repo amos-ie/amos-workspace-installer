@@ -32,7 +32,7 @@ Or name the folder: `... | bash -s -- ~/Projects/amos`.
 
 `setup.sh` clones the workspace over SSH and checks its files out into the folder. It keeps the workspace's git data in `.amos-workspace/store.git` rather than `.git`, so the folder itself isn't a git repo: `git` there only finds your Amos repos, and the editor's Source Control panel lists just them.
 
-Then it runs the workspace's own `install.sh`, which pulls the latest workspace, clones every Amos repo you don't have yet (checking out `dev`), checks your Ruff and gitleaks versions, and installs the pre-commit hook in each repo. A repo that is already in the folder is never pulled or switched.
+Then it runs the workspace's own `install.sh`, which pulls the latest workspace, clones every Amos repo you don't have yet (checking out `dev`), checks your Ruff and gitleaks versions, and installs the pre-commit hook in each repo. A repo that is already in the folder is never switched, but its `dev` branch is fast-forwarded when that is safe (otherwise it is left alone).
 
 Run it again in a folder it has already set up and it just runs `install.sh`.
 
