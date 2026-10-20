@@ -1,2 +1,4 @@
-# Every change needs my review: setup.sh runs on every developer's machine.
+# Ben's review is requested on every change, because setup.sh runs on every
+# developer's machine. This is a notification, not a gate: merging does not
+# require approval.
 *    @bentideswell
