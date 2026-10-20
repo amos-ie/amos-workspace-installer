@@ -10,14 +10,14 @@ You need:
 
 - Access to the Amos GitHub organisation, and an SSH key that works with GitHub (`ssh -T git@github.com`).
 - git, bash and Python 3.
-- **Ruff**, the Python linter, and **gitleaks**, the secret scanner. The checks and the pre-commit hook fail without them, and `install.sh` reports an `ERROR` until they are installed:
+- **Ruff**, the Python linter, and **gitleaks**, the secret scanner. The checks and the pre-commit hook fail without them. `setup.sh` checks for both first, before it changes anything in your folder. If one is missing or too old, it prints the install or update commands for your machine and stops: run those, then run the same setup command again.
 
   ```bash
   pipx install ruff==0.16.10    # the version the workspace pins. No pipx? brew install pipx (macOS) or sudo apt install pipx (WSL/Linux)
   brew install gitleaks         # 8.19.1 or later. WSL/Linux without brew: https://github.com/gitleaks/gitleaks#installing
   ```
 
-  If the workspace moves to a newer Ruff or gitleaks, `install.sh` tells you the version it wants and the command to install it.
+  If the workspace moves to a newer Ruff or gitleaks, `setup.sh` (and `install.sh`, on later runs) tells you the version it wants and the command to install it.
 
 ## Install
 
