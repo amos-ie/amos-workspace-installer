@@ -32,8 +32,18 @@ SSH_HINT="check your network or VPN, and that your GitHub SSH key works (ssh -T 
 SCRATCH=""
 trap '[ -z "$SCRATCH" ] || rm -rf "$SCRATCH"' EXIT
 
+# Red where a person reads the output: a terminal on both stdout and stderr (still true when
+# the script itself comes through a pipe from curl), unless NO_COLOR is set.
+if [ -z "${NO_COLOR:-}" ] && [ -t 1 ] && [ -t 2 ]; then
+  RED=$'\033[31m' RESET=$'\033[0m'
+else
+  RED="" RESET=""
+fi
+# error_line <text>: print an error line to stderr, in red where colour is on.
+error_line() { printf '%s\n' "$RED$1$RESET" >&2; }
+
 fail() {
-  printf 'setup: ERROR: %s\n' "$1" >&2
+  error_line "setup: ERROR: $1"
   exit 1
 }
 
@@ -130,9 +140,9 @@ check_tools() {
       bad=1
       ruff_path="$(command -v ruff || true)"
       if [ -z "$ruff_found" ]; then
-        printf 'setup: ERROR: Ruff (the Python linter) is not installed. Version %s is needed.\n' "$ruff_pin" >&2
+        error_line "setup: ERROR: Ruff (the Python linter) is not installed. Version $ruff_pin is needed."
       else
-        printf 'setup: ERROR: Ruff %s is needed, but you have %s (%s).\n' "$ruff_pin" "$ruff_found" "$ruff_path" >&2
+        error_line "setup: ERROR: Ruff $ruff_pin is needed, but you have $ruff_found ($ruff_path)."
       fi
       echo "setup: Install it with pipx (pipx puts it where every project finds it):" >&2
       # A Homebrew Ruff earlier on the PATH would hide the one pipx installs.
@@ -161,9 +171,9 @@ check_tools() {
     if [ -z "$gitleaks_found" ] || version_lt "$gitleaks_found" "$gitleaks_min"; then
       bad=1
       if [ -z "$gitleaks_found" ]; then
-        printf 'setup: ERROR: gitleaks (the secret scanner) is not installed. Version %s or later is needed.\n' "$gitleaks_min" >&2
+        error_line "setup: ERROR: gitleaks (the secret scanner) is not installed. Version $gitleaks_min or later is needed."
       else
-        printf 'setup: ERROR: gitleaks %s or later is needed, but you have %s.\n' "$gitleaks_min" "$gitleaks_found" >&2
+        error_line "setup: ERROR: gitleaks $gitleaks_min or later is needed, but you have $gitleaks_found."
       fi
       if [ "$have_brew" = 1 ] && { [ -z "$gitleaks_found" ] || brew list --formula gitleaks >/dev/null 2>&1; }; then
         if [ -z "$gitleaks_found" ]; then
@@ -226,7 +236,7 @@ main() {
 
   # Before anything in your folder changes, so stopping here leaves it exactly as it was.
   if ! check_tools "$tmp/store.git"; then
-    echo "setup: Nothing in $target was changed. Fix the above, then run the same setup command again." >&2
+    error_line "setup: Nothing in $target was changed. Fix the above, then run the same setup command again."
     exit 1
   fi
 

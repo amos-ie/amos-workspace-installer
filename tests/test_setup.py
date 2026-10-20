@@ -5,6 +5,7 @@ Run: python3 -m unittest -v tests/test_setup.py   (Python 3 standard library onl
 """
 
 import os
+import pty
 import shutil
 import subprocess
 import tempfile
@@ -85,6 +86,24 @@ class SetupTest(unittest.TestCase):
 
     def setup(self, *args, env=None):
         return sh("bash", SETUP, *args, cwd=self.amos, env={**self.env, **(env or {})}, check=False)
+
+    def setup_in_terminal(self, env=None):
+        """Run setup.sh with stdout and stderr on a terminal, as a developer sees it. Returns (status, output)."""
+        master, slave = pty.openpty()
+        proc = subprocess.Popen(["bash", SETUP], cwd=self.amos, env={**self.env, **(env or {})},
+                                stdin=subprocess.DEVNULL, stdout=slave, stderr=slave)
+        os.close(slave)
+        out = b""
+        while True:
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:  # the terminal closes when the child exits
+                break
+            if not chunk:
+                break
+            out += chunk
+        os.close(master)
+        return proc.wait(), out.decode()
 
     def store(self, *args):
         return sh("git", "--git-dir", os.path.join(self.amos, ".amos-workspace", "store.git"), *args,
@@ -368,6 +387,36 @@ class SetupTest(unittest.TestCase):
         self.tool("gitleaks", exit_code=127)
         result = self.setup()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    RED = "\033[31m"
+
+    def break_ruff(self):
+        self.tool("ruff", exit_code=127)
+
+    def test_errors_are_red_in_a_terminal(self):
+        self.break_ruff()
+        status, out = self.setup_in_terminal()
+        self.assertEqual(status, 1)
+        self.assertIn(f"{self.RED}setup: ERROR: Ruff (the Python linter) is not installed", out)
+        self.assertIn(f"{self.RED}setup: Nothing in", out)
+        self.assertNotIn(f"{self.RED}setup:   pipx install", out)  # the commands stay plain
+        os.rmdir(os.path.join(self.amos, "amos-connect"))
+        status, out = self.setup_in_terminal(env={"AMOS_GIT_BASE": os.path.join(self.tmp.name, "nowhere")})
+        self.assertIn(f"{self.RED}setup: ERROR:", out)  # fail() too
+
+    def test_no_colour_when_no_color_is_set_or_output_is_not_a_terminal(self):
+        self.break_ruff()
+        status, out = self.setup_in_terminal(env={"NO_COLOR": "1"})
+        self.assertEqual(status, 1)
+        self.assertIn("setup: ERROR: Ruff", out)
+        self.assertNotIn("\033", out)
+        result = self.setup()  # piped, as in the other tests
+        self.assertNotIn("\033", result.stderr)
+
+    def test_a_terminal_without_errors_has_no_colour(self):
+        status, out = self.setup_in_terminal()
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("\033", out)
 
 
 if __name__ == "__main__":
