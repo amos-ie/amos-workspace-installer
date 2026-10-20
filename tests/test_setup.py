@@ -97,16 +97,20 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("setup: done.", result.stdout)
 
-    def test_clashing_files_are_all_listed_and_nothing_changes(self):
+    def test_clashing_files_are_backed_up_and_replaced(self):
         write(self.amos, "AGENTS.md", "old\n")
         write(self.amos, ".claude/skills/x/SKILL.md", "old\n")
         result = self.setup()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("  .claude/skills/x/SKILL.md\n  AGENTS.md\n", result.stderr)
-        self.assertIn("nothing was changed", result.stderr)
-        self.assertEqual(read(os.path.join(self.amos, "AGENTS.md")), "old\n")
-        self.assertFalse(os.path.exists(os.path.join(self.amos, ".amos-workspace")))
-        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        backup = os.path.join(self.amos, backups[0])
+        self.assertEqual(read(os.path.join(backup, "AGENTS.md")), "old\n")
+        self.assertEqual(read(os.path.join(backup, ".claude/skills/x/SKILL.md")), "old\n")
+        self.assertNotEqual(read(os.path.join(self.amos, "AGENTS.md")), "old\n")  # workspace's
+        self.assertIn("setup:   .claude/skills/x/SKILL.md\nsetup:   AGENTS.md\n", result.stdout)
+        self.assertIn(backups[0], result.stdout)
+        self.assertEqual(self.store("status", "--porcelain", "--untracked-files=no"), "")
 
     def backups(self):
         return [n for n in os.listdir(self.amos) if n.startswith(".amos-workspace-backup-")]
@@ -148,12 +152,16 @@ class SetupTest(unittest.TestCase):
         self.assertNotIn("moved", result.stdout)
         self.assertEqual(read(os.path.join(self.amos, ".claude/settings.local.json")), "{}\n")
 
-    def test_nothing_is_backed_up_when_setup_stops_on_a_clash(self):
+    def test_clashes_and_stale_files_share_one_backup_folder(self):
         write(self.amos, "AGENTS.md", "old\n")
         write(self.amos, ".cursor/rules/old.mdc", "old rule\n")
-        self.assertEqual(self.setup().returncode, 1)
-        self.assertEqual(self.backups(), [])
-        self.assertEqual(read(os.path.join(self.amos, ".cursor/rules/old.mdc")), "old rule\n")
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        backup = os.path.join(self.amos, backups[0])
+        self.assertEqual(read(os.path.join(backup, "AGENTS.md")), "old\n")
+        self.assertEqual(read(os.path.join(backup, ".cursor/rules/old.mdc")), "old rule\n")
 
     def test_second_run_does_not_back_up_again(self):
         self.setup()

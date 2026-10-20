@@ -8,11 +8,12 @@
 #
 # It clones amos-workspace over SSH and checks its files out into the folder. amos-workspace's
 # git data goes in .amos-workspace/store.git instead of .git, so the folder isn't a git repo
-# and git there only ever finds your Amos repos. It never overwrites a file: if any workspace
-# file already exists in the folder, it lists them all and stops, having changed nothing.
+# and git there only ever finds your Amos repos. It never overwrites or deletes a file: if a
+# workspace file already exists in the folder (a .cursorignore of your own, say), it moves yours
+# into a timestamped backup folder, keeping its path, and says so.
 # Old copies of the Amos skills and rules (from the earlier distribute.sh) that the workspace
-# doesn't track would sit beside the new ones and contradict them, so it moves those into a
-# timestamped backup folder, and says so.
+# doesn't track would sit beside the new ones and contradict them, so it moves those into the
+# same backup folder, and says so.
 # Then it runs .amos-workspace/scripts/install.sh, which clones the Amos repos and installs
 # the checks, and from then on keeps amos-workspace up to date.
 #
@@ -36,10 +37,45 @@ fail() {
 # Folders the AI tools load every file from. Untracked files in them are old copies.
 STALE_DIRS=(.claude/skills .cursor/rules .cursor/commands .cursor/skills)
 
+# The backup folder, made on the first file moved into it.
+BACKUP=""
+
+# move_to_backup <target> <file>: move target/file into the backup folder, keeping its path.
+move_to_backup() {
+  local target="$1" file="$2"
+  if [ -z "$BACKUP" ]; then
+    BACKUP="$target/.amos-workspace-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$BACKUP"
+  fi
+  mkdir -p "$BACKUP/$(dirname "$file")"
+  mv "$target/$file" "$BACKUP/$file"
+}
+
+# back_up_clashes <target> <store>: move files the workspace is about to check out, and that
+# already exist in target, into the backup folder, and say what moved.
+back_up_clashes() {
+  local target="$1" store="$2" path
+  local clashes=()
+  while IFS= read -r -d '' path; do
+    if [ -e "$target/$path" ] || [ -L "$target/$path" ]; then
+      clashes+=("$path")
+    fi
+  done < <(git --git-dir="$store" ls-tree -r -z --name-only HEAD)
+  [ "${#clashes[@]}" -gt 0 ] || return 0
+  for path in "${clashes[@]}"; do
+    move_to_backup "$target" "$path"
+  done
+  echo "setup: ${#clashes[@]} of your files are also amos-workspace files. amos-workspace's copies"
+  echo "setup: replace them, and yours were moved into $BACKUP:"
+  printf 'setup:   %s\n' "${clashes[@]}"
+  echo "setup: Merge anything of yours you still need back into the new files."
+  echo
+}
+
 # back_up_stale <target> <store>: move files in STALE_DIRS that the workspace doesn't track into
-# a backup folder, keeping their paths, and say what moved.
+# the backup folder, keeping their paths, and say what moved.
 back_up_stale() {
-  local target="$1" store="$2" dir file backup="" count=0 tracked
+  local target="$1" store="$2" dir file count=0 tracked
   tracked="$(git --git-dir="$store" -c core.quotepath=off ls-tree -r --name-only HEAD)"
   for dir in "${STALE_DIRS[@]}"; do
     [ -d "$target/$dir" ] || continue
@@ -48,12 +84,7 @@ back_up_stale() {
       if grep -Fxq -- "$file" <<<"$tracked"; then
         continue
       fi
-      if [ -z "$backup" ]; then
-        backup="$target/.amos-workspace-backup-$(date +%Y%m%d-%H%M%S)"
-        mkdir -p "$backup"
-      fi
-      mkdir -p "$backup/$(dirname "$file")"
-      mv "$target/$file" "$backup/$file"
+      move_to_backup "$target" "$file"
       count=$((count + 1))
     done < <(find "$target/$dir" \( -type f -o -type l \) -print0)
     # Leave no empty folders behind where old skills were.
@@ -61,7 +92,7 @@ back_up_stale() {
   done
   if [ "$count" -gt 0 ]; then
     echo "setup: moved $count old skill, rule or command file(s) that amos-workspace doesn't use into"
-    echo "setup:   $backup"
+    echo "setup:   $BACKUP"
     echo "setup: they would have contradicted the new rules. Move one back if you wrote it yourself."
     echo
   fi
@@ -110,24 +141,11 @@ main() {
   git clone -q --branch main --no-checkout --separate-git-dir="$tmp/store.git" "$base/amos-workspace.git" "$tmp/checkout" ||
     fail "could not clone $base/amos-workspace.git (see above); $SSH_HINT."
 
-  # List every clash, not only the first one git would stop at.
-  local clashes path
-  clashes="$(git --git-dir="$tmp/store.git" ls-tree -r -z --name-only HEAD | while IFS= read -r -d '' path; do
-    if [ -e "$target/$path" ] || [ -L "$target/$path" ]; then
-      printf '  %s\n' "$path"
-    fi
-  done)"
-  if [ -n "$clashes" ]; then
-    fail "these amos-workspace files are already in $target, so nothing was changed:
-$clashes
-Move them out of the way (for example into ~/amos-backup), then run setup again.
-If they are old copies of the Amos rules or skills, delete them: the workspace replaces them."
-  fi
-
   # Before the checkout, so a failure here leaves nothing half-installed: a rerun starts clean.
+  back_up_clashes "$target" "$tmp/store.git"
   back_up_stale "$target" "$tmp/store.git"
 
-  # read-tree refuses to overwrite a file, so nothing is lost if one appeared since the check.
+  # read-tree refuses to overwrite a file, so nothing is lost if one appeared since the backup.
   git --git-dir="$tmp/store.git" config core.worktree "$target"
   git --git-dir="$tmp/store.git" read-tree -m -u HEAD || fail "could not check out amos-workspace (see above)."
   mv "$tmp/store.git" "$target/$STORE"
