@@ -44,13 +44,9 @@ The first time, the editor asks **"Allow automatic tasks?"**: choose Allow. From
 
 ## A folder that already has files in it
 
-If you already have an `amos/` folder with repos and personal files in it, run the same command there. Your repos and personal files are never touched. Setup never overwrites a file, and it has two rules for what is already there:
+If you already have an `amos/` folder with repos and personal files in it, run the same command there. Your repos and personal files are never touched. Setup never overwrites or deletes a file, and it has two rules for what is already there:
 
-- **Files the workspace also has** (usually an old copy of `AGENTS.md`, `CLAUDE.md`, `.vscode/settings.json`, `.claude/settings.json`) stop setup. It lists every one, changes nothing, and you move them aside and run it again:
-
-  ```bash
-  mkdir -p ~/amos-backup && mv AGENTS.md CLAUDE.md .vscode ~/amos-backup/
-  ```
+- **Files the workspace also has** (usually your own `.cursorignore`, or an old copy of `AGENTS.md`, `CLAUDE.md`, `.vscode/settings.json`, `.claude/settings.json`) are replaced by the workspace's copy. Setup first moves yours into a `.amos-workspace-backup-<timestamp>/` folder in `amos/`, keeping its path, and lists each one. Merge back anything you still need.
 
 - **Old copies of the Amos skills and rules** that the workspace doesn't have (from the earlier `distribute.sh`: files in `.claude/skills/`, `.cursor/rules/`, `.cursor/commands/` and `.cursor/skills/`) would be loaded beside the new ones and contradict them. Setup moves them into a `.amos-workspace-backup-<timestamp>/` folder in `amos/` and tells you. Nothing is deleted: if one was your own, move it back. Your own `.claude/settings.local.json` is never touched.
 
