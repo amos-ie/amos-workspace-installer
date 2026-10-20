@@ -5,6 +5,7 @@ Run: python3 -m unittest -v tests/test_setup.py   (Python 3 standard library onl
 """
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +16,10 @@ FAKE_INSTALL = """#!/usr/bin/env bash
 echo "install ran in $(pwd -P) from ${0%/.amos-workspace/scripts/install.sh}"
 exit "${FAKE_INSTALL_EXIT:-0}"
 """
+
+
+BASIC_COMMANDS = ["bash", "sh", "git", "python3", "ssh", "sed", "awk", "grep", "find", "mktemp", "date", "mv", "rm",
+                  "mkdir", "cp", "cat", "dirname", "basename", "tr", "sort", "head", "env", "uname", "ls", "ln"]
 
 
 def sh(*cmd, cwd=None, env=None, check=True, stdin=None):
@@ -52,9 +57,18 @@ class SetupTest(unittest.TestCase):
         sh("git", "add", "-A", cwd=src, env=self.env)
         sh("git", "commit", "-q", "-m", "ws", cwd=src, env=self.env)
         sh("git", "clone", "-q", "--bare", src, os.path.join(t, "remotes", "amos-workspace.git"), env=self.env)
-        # Stand-ins for the tools, first on the PATH, so the tests don't depend on what is installed.
+        # The PATH is only the commands setup.sh and git need, plus stand-ins for Ruff and gitleaks
+        # (and brew, pipx, apt-get where a test wants them), so the tests don't depend on what the
+        # machine running them has installed.
+        basic = os.path.join(t, "basic")
+        os.makedirs(basic)
+        for name in BASIC_COMMANDS:
+            found = shutil.which(name)
+            if found:
+                os.symlink(found, os.path.join(basic, name))
         self.bin = os.path.join(t, "bin")
-        self.env["PATH"] = self.bin + os.pathsep + os.environ["PATH"]
+        os.makedirs(self.bin)
+        self.env["PATH"] = self.bin + os.pathsep + basic
         self.tool("ruff", "ruff 0.16.10")
         self.tool("gitleaks", "v8.19.1")
         self.amos = os.path.join(t, "amos")
@@ -323,6 +337,16 @@ class SetupTest(unittest.TestCase):
         result = self.setup()
         self.assertNotIn("ensurepath", result.stderr)
         self.assertIn("pipx install --force ruff==0.16.10", result.stderr)
+
+    def test_commands_without_brew_use_apt_or_pip(self):
+        self.tool("ruff", exit_code=127)
+        self.tool("gitleaks", exit_code=127)
+        result = self.setup()
+        self.assertIn("python3 -m pip install --user pipx && python3 -m pipx ensurepath", result.stderr)
+        self.assertIn("https://github.com/gitleaks/gitleaks#installing", result.stderr)
+        self.tool("apt-get")
+        result = self.setup()
+        self.assertIn("sudo apt install pipx && pipx ensurepath", result.stderr)
 
     def test_old_brew_gitleaks_is_upgraded_and_a_brew_ruff_removed_first(self):
         self.tool("ruff", "ruff 0.15.0")
