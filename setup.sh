@@ -4,8 +4,6 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/amos-ie/amos-workspace-installer/main/setup.sh | bash
 #
-# or name the folder:  ... | bash -s -- ~/Projects/amos
-#
 # It clones amos-workspace over SSH and checks its files out into the folder. amos-workspace's
 # git data goes in .amos-workspace/store.git instead of .git, so the folder isn't a git repo
 # and git there only ever finds your Amos repos. It never overwrites or deletes a file: if a
@@ -121,7 +119,7 @@ run_install() {
 
 # Everything happens in main, called on the last line, so a download cut short runs nothing.
 main() {
-  local target="${1:-$PWD}"
+  local target="$PWD"
   local base="${AMOS_GIT_BASE:-git@github.com:amos-ie}"
 
   local tool
