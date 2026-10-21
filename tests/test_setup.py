@@ -5,6 +5,7 @@ Run: python3 -m unittest -v tests/test_setup.py   (Python 3 standard library onl
 """
 
 import os
+import shutil
 import pty
 import subprocess
 import tempfile
@@ -14,6 +15,7 @@ SETUP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FAKE_INSTALL = """#!/usr/bin/env bash
 echo "install ran in $(pwd -P) from ${0%/.amos-workspace/scripts/install.sh}"
+[ -e .vscode/settings.json ] && echo "settings present during install" || echo "settings absent during install"
 exit "${FAKE_INSTALL_EXIT:-0}"
 """
 
@@ -44,6 +46,7 @@ class SetupTest(unittest.TestCase):
         os.makedirs(self.env["HOME"])
         src = os.path.join(t, "src")
         write(src, "AGENTS.md", "agents\n")
+        write(src, ".vscode/settings.json", "{}\n")
         write(src, ".claude/skills/x/SKILL.md", "skill\n")
         write(src, ".amos-workspace/scripts/install.sh", FAKE_INSTALL)
         os.chmod(os.path.join(src, ".amos-workspace/scripts/install.sh"), 0o755)
@@ -130,6 +133,22 @@ class SetupTest(unittest.TestCase):
         self.assertIn("setup:   .claude/skills/x/SKILL.md\nsetup:   AGENTS.md\n", result.stdout)
         self.assertIn(backups[0], result.stdout)
         self.assertEqual(self.store("status", "--porcelain", "--untracked-files=no"), "")
+
+    def test_a_backed_up_ruff_config_is_renamed_so_the_editor_ignores_it(self):
+        write(self.amos, "ruff.toml", "old\n")
+        write(self.amos, ".vscode/x", "")  # keep the tree non-trivial
+        # the workspace must track a ruff.toml for it to clash
+        src = os.path.join(os.path.dirname(self.amos), "src")
+        write(src, "ruff.toml", "new\n")
+        sh("git", "add", "-A", cwd=src, env=self.env)
+        sh("git", "commit", "-q", "-m", "ruff", cwd=src, env=self.env)
+        sh("git", "push", "-q", os.path.join(os.path.dirname(self.amos), "remotes", "amos-workspace.git"), "main", cwd=src, env=self.env)
+        result = self.setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        backup = os.path.join(self.amos, self.backups()[0])
+        self.assertEqual(read(os.path.join(backup, "ruff.toml.backup")), "old\n")
+        self.assertFalse(os.path.exists(os.path.join(backup, "ruff.toml")))
+        self.assertEqual(read(os.path.join(self.amos, "ruff.toml")), "new\n")
 
     def backups(self):
         return [n for n in os.listdir(self.amos) if n.startswith(".amos-workspace-backup-")]
@@ -283,6 +302,17 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("needs the errors above fixed", result.stderr)
         self.assertTrue(os.path.isdir(os.path.join(self.amos, ".amos-workspace", "store.git")))
+
+    def test_editor_settings_wait_for_the_install_and_are_restored_even_when_it_fails(self):
+        for exit_code in ("0", "1"):
+            with self.subTest(install_exit=exit_code):
+                shutil.rmtree(self.amos)
+                os.makedirs(os.path.join(self.amos, "amos-connect"))
+                result = self.setup(env={"FAKE_INSTALL_EXIT": exit_code})
+                self.assertEqual(result.returncode, int(exit_code), result.stdout + result.stderr)
+                self.assertIn("settings absent during install", result.stdout)
+                self.assertEqual(read(os.path.join(self.amos, ".vscode/settings.json")), "{}\n")
+                self.assertEqual(self.store("status", "--porcelain", "--untracked-files=no"), "")
 
     RED = "\033[31m"
 

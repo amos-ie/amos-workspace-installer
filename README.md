@@ -31,9 +31,11 @@ Run it again in a folder it has already set up and it just runs `install.sh`.
 
 ## Then open the folder in your editor
 
-Open `amos/` in VS Code (with Claude Code) or Cursor, and install the **Ruff** extension (`charliermarsh.ruff`, by Astral). Both editors offer it under Extensions → `@recommended`.
+Open `amos/` in VS Code (with Claude Code) or Cursor, and install the recommended extensions: when the editor offers them, choose Install (or go to Extensions → `@recommended`). **Ruff** (`charliermarsh.ruff`, by Astral) is the one that matters: it sorts imports on save. The others are Python and Pylance (for the Lambdas) and the Angular language service.
 
 The first time, the editor asks **"Allow automatic tasks?"**: choose Allow. From then on `install.sh` runs each time you open `amos/`, which keeps the workspace up to date.
+
+If the editor never asked, or you chose Disallow, nothing is broken: the Ruff and gitleaks checks install what they need themselves, and you can update by hand with `bash .amos-workspace/scripts/install.sh`. To turn the automatic run on, trust the folder (**Workspaces: Manage Workspace Trust**) and run **Tasks: Manage Automatic Tasks in Folder** → Allow. Cursor ships with Workspace Trust off, so turn it on there first (`security.workspace.trust.enabled`).
 
 ## A folder that already has files in it
 
