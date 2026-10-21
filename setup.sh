@@ -16,9 +16,6 @@
 # same backup folder, and says so.
 # Then it runs .amos-workspace/scripts/install.sh, which clones the Amos repos and installs
 # the checks, and from then on keeps amos-workspace up to date.
-# The checks need Ruff and gitleaks, at the versions the workspace names. Before it changes
-# anything in your folder, setup checks you have them, and if not, prints the commands to
-# install or update them for your machine and stops. Run setup again once they are installed.
 #
 # Run it again in a folder it has already set up and it just runs install.sh.
 #
@@ -111,86 +108,6 @@ back_up_stale() {
   fi
 }
 
-# version_lt <a> <b>: true if version a is older than version b.
-version_lt() {
-  python3 -c 'import re, sys
-v = lambda s: tuple(int(n) for n in re.findall(r"\d+", s)[:3])
-sys.exit(not v(sys.argv[1]) < v(sys.argv[2]))' "$1" "$2"
-}
-
-# check_tools <store>: Ruff and gitleaks must be installed at the versions the workspace names
-# (install.sh checks the same, and fails without them). The versions are read from the cloned
-# store, before anything is checked out. If a tool is missing or too old, print the commands
-# for this machine and return 1. A version the workspace doesn't name isn't checked.
-check_tools() {
-  local store="$1" ruff_pin gitleaks_min ruff_found ruff_path gitleaks_found
-  local bad=0 have_brew=0 have_pipx=0 have_apt=0
-  command -v brew >/dev/null && have_brew=1
-  command -v pipx >/dev/null && have_pipx=1
-  command -v apt-get >/dev/null && have_apt=1
-
-  ruff_pin="$(git --git-dir="$store" show HEAD:.amos-workspace/repo-files/ruff.toml 2>/dev/null |
-    sed -n 's/^required-version = "==\(.*\)"$/\1/p')" || true
-  gitleaks_min="$(git --git-dir="$store" show HEAD:.amos-workspace/repo-files/dot-amos/gitleaks.toml 2>/dev/null |
-    sed -n 's/^# min-version = "\(.*\)"$/\1/p')" || true
-
-  if [ -n "$ruff_pin" ]; then
-    ruff_found="$(ruff --version 2>/dev/null | awk '{print $2}')" || true
-    if [ "$ruff_found" != "$ruff_pin" ]; then
-      bad=1
-      ruff_path="$(command -v ruff || true)"
-      if [ -z "$ruff_found" ]; then
-        error_line "setup: ERROR: Ruff (the Python linter) is not installed. Version $ruff_pin is needed."
-      else
-        error_line "setup: ERROR: Ruff $ruff_pin is needed, but you have $ruff_found ($ruff_path)."
-      fi
-      echo "setup: Install it with pipx (pipx puts it where every project finds it):" >&2
-      # A Homebrew Ruff earlier on the PATH would hide the one pipx installs.
-      if [ "$have_brew" = 1 ] && brew list --formula ruff >/dev/null 2>&1; then
-        echo "setup:   brew uninstall ruff" >&2
-      fi
-      if [ "$have_pipx" = 0 ]; then
-        if [ "$have_brew" = 1 ]; then
-          echo "setup:   brew install pipx && pipx ensurepath" >&2
-        elif [ "$have_apt" = 1 ]; then
-          echo "setup:   sudo apt install pipx && pipx ensurepath" >&2
-        else
-          echo "setup:   python3 -m pip install --user pipx && python3 -m pipx ensurepath" >&2
-        fi
-      fi
-      echo "setup:   pipx install --force ruff==$ruff_pin" >&2
-      if [ "$have_pipx" = 0 ]; then
-        echo "setup: (open a new terminal after pipx ensurepath, so ruff is on your PATH)" >&2
-      fi
-      echo >&2
-    fi
-  fi
-
-  if [ -n "$gitleaks_min" ]; then
-    gitleaks_found="$(gitleaks version 2>/dev/null | sed 's/^v//')" || true
-    if [ -z "$gitleaks_found" ] || version_lt "$gitleaks_found" "$gitleaks_min"; then
-      bad=1
-      if [ -z "$gitleaks_found" ]; then
-        error_line "setup: ERROR: gitleaks (the secret scanner) is not installed. Version $gitleaks_min or later is needed."
-      else
-        error_line "setup: ERROR: gitleaks $gitleaks_min or later is needed, but you have $gitleaks_found."
-      fi
-      if [ "$have_brew" = 1 ] && { [ -z "$gitleaks_found" ] || brew list --formula gitleaks >/dev/null 2>&1; }; then
-        if [ -z "$gitleaks_found" ]; then
-          echo "setup: Install it with:  brew install gitleaks" >&2
-        else
-          echo "setup: Update it with:  brew upgrade gitleaks" >&2
-        fi
-      else
-        echo "setup: Install it from https://github.com/gitleaks/gitleaks#installing (a release binary on your PATH is fine)." >&2
-      fi
-      echo >&2
-    fi
-  fi
-
-  [ "$bad" = 0 ] || return 1
-}
-
 run_install() {
   # stdin may be this script, coming through a pipe: install.sh mustn't read it.
   (cd "$1" && bash .amos-workspace/scripts/install.sh </dev/null)
@@ -233,12 +150,6 @@ main() {
   # and the only branch install.sh pulls for developers.
   git clone -q --branch main --no-checkout --separate-git-dir="$tmp/store.git" "$base/amos-workspace.git" "$tmp/checkout" ||
     fail "could not clone $base/amos-workspace.git (see above); $SSH_HINT."
-
-  # Before anything in your folder changes, so stopping here leaves it exactly as it was.
-  if ! check_tools "$tmp/store.git"; then
-    error_line "setup: Nothing in $target was changed. Fix the above, then run the same setup command again."
-    exit 1
-  fi
 
   # Before the checkout, so a failure here leaves nothing half-installed: a rerun starts clean.
   back_up_clashes "$target" "$tmp/store.git"

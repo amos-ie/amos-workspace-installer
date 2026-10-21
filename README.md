@@ -10,14 +10,7 @@ You need:
 
 - Access to the Amos GitHub organisation, and an SSH key that works with GitHub (`ssh -T git@github.com`).
 - git, bash and Python 3.
-- **Ruff**, the Python linter, and **gitleaks**, the secret scanner. The checks and the pre-commit hook fail without them. `setup.sh` checks for both first, before it changes anything in your folder. If one is missing or too old, it prints the install or update commands for your machine and stops: run those, then run the same setup command again.
-
-  ```bash
-  pipx install ruff==0.16.10    # the version the workspace pins. No pipx? brew install pipx (macOS) or sudo apt install pipx (WSL/Linux)
-  brew install gitleaks         # 8.19.1 or later. WSL/Linux without brew: https://github.com/gitleaks/gitleaks#installing
-  ```
-
-  If the workspace moves to a newer Ruff or gitleaks, `setup.sh` (and `install.sh`, on later runs) tells you the version it wants and the command to install it.
+- Nothing else. **Ruff** (the Python linter) and **gitleaks** (the secret scanner) are installed for you, at the versions the workspace pins, into `amos/.amos-workspace/bin`. There is no brew, pipx or PATH step, and no Python is installed or changed. If the version there is wrong, `install.sh` replaces it, so a version bump reaches you the next time you open `amos/`.
 
 ## Install
 
@@ -32,7 +25,7 @@ Or name the folder: `... | bash -s -- ~/Projects/amos`.
 
 `setup.sh` clones the workspace over SSH and checks its files out into the folder. It keeps the workspace's git data in `.amos-workspace/store.git` rather than `.git`, so the folder itself isn't a git repo: `git` there only finds your Amos repos, and the editor's Source Control panel lists just them.
 
-Then it runs the workspace's own `install.sh`, which pulls the latest workspace, clones every Amos repo you don't have yet (checking out `dev`), checks your Ruff and gitleaks versions, and installs the pre-commit hook in each repo. A repo that is already in the folder is never switched, but its `dev` branch is fast-forwarded when that is safe (otherwise it is left alone).
+Then it runs the workspace's own `install.sh`, which pulls the latest workspace, clones every Amos repo you don't have yet (checking out `dev`), downloads Ruff and gitleaks into `.amos-workspace/bin` (checked against their published SHA-256; nothing happens if the right versions are already there), and installs the pre-commit hook in each repo. A repo that is already in the folder is never switched, but its `dev` branch is fast-forwarded when that is safe (otherwise it is left alone).
 
 Run it again in a folder it has already set up and it just runs `install.sh`.
 

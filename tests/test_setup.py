@@ -6,7 +6,6 @@ Run: python3 -m unittest -v tests/test_setup.py   (Python 3 standard library onl
 
 import os
 import pty
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -17,10 +16,6 @@ FAKE_INSTALL = """#!/usr/bin/env bash
 echo "install ran in $(pwd -P) from ${0%/.amos-workspace/scripts/install.sh}"
 exit "${FAKE_INSTALL_EXIT:-0}"
 """
-
-
-BASIC_COMMANDS = ["bash", "sh", "git", "python3", "ssh", "sed", "awk", "grep", "find", "mktemp", "date", "mv", "rm",
-                  "mkdir", "cp", "cat", "dirname", "basename", "tr", "sort", "head", "env", "uname", "ls", "ln"]
 
 
 def sh(*cmd, cwd=None, env=None, check=True, stdin=None):
@@ -51,35 +46,14 @@ class SetupTest(unittest.TestCase):
         write(src, "AGENTS.md", "agents\n")
         write(src, ".claude/skills/x/SKILL.md", "skill\n")
         write(src, ".amos-workspace/scripts/install.sh", FAKE_INSTALL)
-        write(src, ".amos-workspace/repo-files/ruff.toml", 'required-version = "==0.16.10"\n')
-        write(src, ".amos-workspace/repo-files/dot-amos/gitleaks.toml", '# min-version = "8.19.1"\n')
         os.chmod(os.path.join(src, ".amos-workspace/scripts/install.sh"), 0o755)
         sh("git", "init", "-q", "-b", "main", cwd=src, env=self.env)
         sh("git", "add", "-A", cwd=src, env=self.env)
         sh("git", "commit", "-q", "-m", "ws", cwd=src, env=self.env)
         sh("git", "clone", "-q", "--bare", src, os.path.join(t, "remotes", "amos-workspace.git"), env=self.env)
-        # The PATH is only the commands setup.sh and git need, plus stand-ins for Ruff and gitleaks
-        # (and brew, pipx, apt-get where a test wants them), so the tests don't depend on what the
-        # machine running them has installed.
-        basic = os.path.join(t, "basic")
-        os.makedirs(basic)
-        for name in BASIC_COMMANDS:
-            found = shutil.which(name)
-            if found:
-                os.symlink(found, os.path.join(basic, name))
-        self.bin = os.path.join(t, "bin")
-        os.makedirs(self.bin)
-        self.env["PATH"] = self.bin + os.pathsep + basic
-        self.tool("ruff", "ruff 0.16.10")
-        self.tool("gitleaks", "v8.19.1")
         self.amos = os.path.join(t, "amos")
         os.makedirs(os.path.join(self.amos, "amos-connect"))
         write(self.amos, "notes.md", "mine\n")
-
-    def tool(self, name, version=None, exit_code=0):
-        """Install a fake `name` that prints `version` (a tool that is missing: exit_code 127, no output)."""
-        write(self.bin, name, f'#!/bin/sh\n[ -z "{version or ""}" ] || echo "{version or ""}"\nexit {exit_code}\n')
-        os.chmod(os.path.join(self.bin, name), 0o755)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -310,107 +284,21 @@ class SetupTest(unittest.TestCase):
         self.assertIn("needs the errors above fixed", result.stderr)
         self.assertTrue(os.path.isdir(os.path.join(self.amos, ".amos-workspace", "store.git")))
 
-    def assert_untouched(self):
-        self.assertEqual(sorted(os.listdir(self.amos)), ["amos-connect", "notes.md"])
-
-    def test_missing_tools_stop_setup_before_it_changes_anything(self):
-        self.tool("ruff", exit_code=127)
-        self.tool("gitleaks", exit_code=127)
-        result = self.setup()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("Ruff (the Python linter) is not installed. Version 0.16.10 is needed", result.stderr)
-        self.assertIn("pipx install --force ruff==0.16.10", result.stderr)
-        self.assertIn("gitleaks (the secret scanner) is not installed. Version 8.19.1 or later is needed", result.stderr)
-        self.assertIn("run the same setup command again", result.stderr)
-        self.assertNotIn("install ran", result.stdout)
-        self.assert_untouched()
-
-    def test_old_tools_say_what_you_have_and_what_is_needed(self):
-        self.tool("ruff", "ruff 0.15.0")
-        self.tool("gitleaks", "v8.10.0")
-        result = self.setup()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("Ruff 0.16.10 is needed, but you have 0.15.0", result.stderr)
-        self.assertIn("gitleaks 8.19.1 or later is needed, but you have 8.10.0", result.stderr)
-        self.assert_untouched()
-
-    def test_newer_gitleaks_and_the_exact_ruff_are_accepted(self):
-        self.tool("gitleaks", "v8.30.1")
-        result = self.setup()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_a_newer_ruff_is_not_accepted(self):
-        self.tool("ruff", "ruff 0.17.0")
-        result = self.setup()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("you have 0.17.0", result.stderr)
-
-    def test_commands_fit_the_machine(self):
-        self.tool("ruff", exit_code=127)
-        self.tool("gitleaks", exit_code=127)
-        self.tool("brew", exit_code=1)  # brew exists, and has nothing installed
-        result = self.setup()
-        self.assertIn("brew install pipx && pipx ensurepath", result.stderr)
-        self.assertIn("brew install gitleaks", result.stderr)
-        self.tool("pipx")  # pipx exists too: no step to install it
-        result = self.setup()
-        self.assertNotIn("ensurepath", result.stderr)
-        self.assertIn("pipx install --force ruff==0.16.10", result.stderr)
-
-    def test_commands_without_brew_use_apt_or_pip(self):
-        self.tool("ruff", exit_code=127)
-        self.tool("gitleaks", exit_code=127)
-        result = self.setup()
-        self.assertIn("python3 -m pip install --user pipx && python3 -m pipx ensurepath", result.stderr)
-        self.assertIn("https://github.com/gitleaks/gitleaks#installing", result.stderr)
-        self.tool("apt-get")
-        result = self.setup()
-        self.assertIn("sudo apt install pipx && pipx ensurepath", result.stderr)
-
-    def test_old_brew_gitleaks_is_upgraded_and_a_brew_ruff_removed_first(self):
-        self.tool("ruff", "ruff 0.15.0")
-        self.tool("gitleaks", "v8.10.0")
-        self.tool("brew")  # `brew list` succeeds: both came from brew
-        self.tool("pipx")
-        result = self.setup()
-        self.assertIn("brew upgrade gitleaks", result.stderr)
-        self.assertLess(result.stderr.index("brew uninstall ruff"), result.stderr.index("pipx install --force"))
-
-    def test_a_workspace_that_names_no_versions_checks_nothing(self):
-        remote = os.path.join(self.env["AMOS_GIT_BASE"], "amos-workspace.git")
-        work = os.path.join(self.tmp.name, "edit")
-        sh("git", "clone", "-q", remote, work, env=self.env)
-        sh("git", "rm", "-q", "-r", ".amos-workspace/repo-files", cwd=work, env=self.env)
-        sh("git", "commit", "-q", "-m", "drop", cwd=work, env=self.env)
-        sh("git", "push", "-q", "origin", "main", cwd=work, env=self.env)
-        self.tool("ruff", exit_code=127)
-        self.tool("gitleaks", exit_code=127)
-        result = self.setup()
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
     RED = "\033[31m"
 
-    def break_ruff(self):
-        self.tool("ruff", exit_code=127)
+    NOWHERE = {"AMOS_GIT_BASE": "/nonexistent/remotes"}  # a clone that fails: setup.sh's error path
 
     def test_errors_are_red_in_a_terminal(self):
-        self.break_ruff()
-        status, out = self.setup_in_terminal()
+        status, out = self.setup_in_terminal(env=self.NOWHERE)
         self.assertEqual(status, 1)
-        self.assertIn(f"{self.RED}setup: ERROR: Ruff (the Python linter) is not installed", out)
-        self.assertIn(f"{self.RED}setup: Nothing in", out)
-        self.assertNotIn(f"{self.RED}setup:   pipx install", out)  # the commands stay plain
-        os.rmdir(os.path.join(self.amos, "amos-connect"))
-        status, out = self.setup_in_terminal(env={"AMOS_GIT_BASE": os.path.join(self.tmp.name, "nowhere")})
-        self.assertIn(f"{self.RED}setup: ERROR:", out)  # fail() too
+        self.assertIn(f"{self.RED}setup: ERROR: could not clone", out)
 
     def test_no_colour_when_no_color_is_set_or_output_is_not_a_terminal(self):
-        self.break_ruff()
-        status, out = self.setup_in_terminal(env={"NO_COLOR": "1"})
+        status, out = self.setup_in_terminal(env={**self.NOWHERE, "NO_COLOR": "1"})
         self.assertEqual(status, 1)
-        self.assertIn("setup: ERROR: Ruff", out)
+        self.assertIn("setup: ERROR: could not clone", out)
         self.assertNotIn("\033", out)
-        result = self.setup()  # piped, as in the other tests
+        result = self.setup(env=self.NOWHERE)  # piped, as in the other tests
         self.assertNotIn("\033", result.stderr)
 
     def test_a_terminal_without_errors_has_no_colour(self):
