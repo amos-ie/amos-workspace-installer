@@ -50,7 +50,10 @@ STALE_DIRS=(.claude/skills .cursor/rules .cursor/commands .cursor/skills)
 # The backup folder, made on the first file moved into it.
 BACKUP=""
 
-# move_to_backup <target> <file>: move target/file into the backup folder, keeping its path.
+# move_to_backup <target> <file>: move target/file into the backup folder, keeping its path. A Ruff
+# config gets ".backup" added to its name: the backup folder is inside amos/, and the editor's Ruff
+# extension loads every ruff.toml it finds there, so a backed-up one with an old pin would show
+# errors for as long as the backup exists.
 move_to_backup() {
   local target="$1" file="$2"
   if [ -z "$BACKUP" ]; then
@@ -58,7 +61,10 @@ move_to_backup() {
     mkdir -p "$BACKUP"
   fi
   mkdir -p "$BACKUP/$(dirname "$file")"
-  mv "$target/$file" "$BACKUP/$file"
+  case "$(basename "$file")" in
+    ruff.toml|.ruff.toml|pyproject.toml) mv "$target/$file" "$BACKUP/$file.backup" ;;
+    *) mv "$target/$file" "$BACKUP/$file" ;;
+  esac
 }
 
 # back_up_clashes <target> <store>: move files the workspace is about to check out, and that
@@ -164,12 +170,25 @@ main() {
   echo "setup: amos-workspace $(git --git-dir="$target/$STORE" rev-parse --short HEAD) is in $target"
   echo
 
-  run_install "$target" || {
+  # An editor that has the folder open starts its Ruff extension the moment .vscode/settings.json
+  # appears. That file points at the Ruff install.sh is about to download, so until the download
+  # finishes the extension falls back to its own Ruff and reports a version mismatch against the
+  # repos' pins. Hold the file back until the tools are in, then put it back from the store. The
+  # restore runs whether or not install.sh succeeded: a failed install must still leave the
+  # settings in place.
+  local settings=.vscode/settings.json held=0 status=0
+  if [ -f "$target/$settings" ] && rm "$target/$settings"; then held=1; fi
+  run_install "$target" || status=$?
+  if [ "$held" = 1 ]; then
+    git --git-dir="$target/$STORE" checkout -- "$settings" ||
+      error_line "setup: ERROR: could not restore $settings. Run: git --git-dir=$STORE checkout -- $settings"
+  fi
+  if [ "$status" -ne 0 ]; then
     echo
     echo "setup: amos-workspace is installed, but install.sh needs the errors above fixed. Then run:" >&2
     echo "  cd $target && .amos-workspace/scripts/install.sh" >&2
     exit 1
-  }
+  fi
   echo
   echo "setup: done. Open $target in VS Code or Cursor, and choose Allow when it asks to allow automatic tasks."
 }
