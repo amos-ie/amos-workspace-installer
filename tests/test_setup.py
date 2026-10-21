@@ -61,8 +61,8 @@ class SetupTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def setup(self, *args, env=None):
-        return sh("bash", SETUP, *args, cwd=self.amos, env={**self.env, **(env or {})}, check=False)
+    def setup(self, cwd=None, env=None):
+        return sh("bash", SETUP, cwd=cwd or self.amos, env={**self.env, **(env or {})}, check=False)
 
     def setup_in_terminal(self, env=None):
         """Run setup.sh with stdout and stderr on a terminal, as a developer sees it. Returns (status, output)."""
@@ -113,9 +113,9 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.store("symbolic-ref", "--short", "HEAD"), "main")
         self.assertEqual(self.store("rev-parse", "--abbrev-ref", "main@{upstream}"), "origin/main")
 
-    def test_runs_from_a_pipe_and_with_the_folder_named(self):
+    def test_runs_from_a_pipe(self):
         with open(SETUP) as script:
-            result = sh("bash", "-s", "--", self.amos, cwd=self.env["HOME"], env=self.env, check=False, stdin=script)
+            result = sh("bash", "-s", cwd=self.amos, env=self.env, check=False, stdin=script)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("setup: done.", result.stdout)
 
