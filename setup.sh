@@ -4,7 +4,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/amos-ie/amos-workspace-installer/main/setup.sh | bash
 #
-# It clones amos-workspace over SSH and checks its files out into the folder. amos-workspace's
+# It clones amos-workspace (over SSH, or over HTTPS if AMOS_GIT_BASE is an https:// URL) and checks its files out into the folder. amos-workspace's
 # git data goes in .amos-workspace/store.git instead of .git, so the folder isn't a git repo
 # and git there only ever finds your Amos repos. It never overwrites or deletes a file: if a
 # workspace file already exists in the folder (a .cursorignore of your own, say), it moves yours
@@ -18,11 +18,14 @@
 # Run it again in a folder it has already set up and it just runs install.sh.
 #
 # Environment:
-#   AMOS_GIT_BASE   clone URL prefix (default git@github.com:amos-ie)
+#   AMOS_GIT_BASE   clone URL prefix (default git@github.com:amos-ie). For HTTPS, set it to
+#                   https://github.com/amos-ie; git then needs a credential helper that holds
+#                   your GitHub token (for example `gh auth setup-git`).
 set -euo pipefail
 
 STORE=.amos-workspace/store.git
 SSH_HINT="check your network or VPN, and that your GitHub SSH key works (ssh -T git@github.com)"
+HTTPS_HINT="check your network or VPN, and that git has a GitHub token stored (for example: gh auth login && gh auth setup-git)"
 # The scratch folder, deleted on exit.
 SCRATCH=""
 trap '[ -z "$SCRATCH" ] || rm -rf "$SCRATCH"' EXIT
@@ -153,7 +156,7 @@ main() {
   # main by name, whatever the repo's default branch: main is the released workspace,
   # and the only branch install.sh pulls for developers.
   git clone -q --branch main --no-checkout --separate-git-dir="$tmp/store.git" "$base/amos-workspace.git" "$tmp/checkout" ||
-    fail "could not clone $base/amos-workspace.git (see above); $SSH_HINT."
+    fail "could not clone $base/amos-workspace.git (see above); $(case "$base" in https://*) echo "$HTTPS_HINT" ;; *) echo "$SSH_HINT" ;; esac)."
 
   # Before the checkout, so a failure here leaves nothing half-installed: a rerun starts clean.
   back_up_clashes "$target" "$tmp/store.git"
