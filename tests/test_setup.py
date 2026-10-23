@@ -297,6 +297,14 @@ class SetupTest(unittest.TestCase):
         self.assertIn("ssh -T git@github.com", result.stderr)
         self.assertEqual(sorted(os.listdir(self.amos)), ["amos-connect", "notes.md"])
 
+    def test_failed_https_clone_points_at_the_git_token_not_ssh(self):
+        # Nothing listens on port 1, so the clone fails.
+        result = self.setup(env={"AMOS_GIT_BASE": "https://127.0.0.1:1/amos-ie"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("could not clone", result.stderr)
+        self.assertIn("git has a GitHub token stored", result.stderr)
+        self.assertNotIn("ssh -T", result.stderr)
+
     def test_failed_install_keeps_the_workspace_and_says_what_to_run(self):
         result = self.setup(env={"FAKE_INSTALL_EXIT": "1"})
         self.assertEqual(result.returncode, 1)
