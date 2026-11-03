@@ -20,6 +20,13 @@ Your repos and personal files are never touched or deleted. If the folder alread
 
 If `amos/` is already a git clone of amos-workspace (it has `.git`), setup refuses: that is the maintainer layout.
 
+## On Windows
+
+Use either of these:
+
+- **Git Bash.** Install [Git for Windows](https://git-scm.com/download/win) at its default location and Python 3 from [python.org](https://www.python.org/downloads/windows/). Open Git Bash and run the install command above, in a folder such as `~/amos`. Then open that folder in Cursor or VS Code on Windows. No `python3` is needed: the scripts use `py` or `python`. To run a check yourself, type `py` where the docs say `python3`.
+- **WSL.** Run the install command in a WSL terminal, in a folder in your Linux home (`~/amos`, not under `/mnt/c`, which is slow). Then open the folder with the editor's WSL extension, so the editor runs on Linux.
+
 ## Then open the folder in your editor
 
 Open `amos/` in VS Code or Cursor and install the recommended extensions (Extensions → `@recommended`). **Ruff** is the one that matters: it sorts imports on save.

@@ -125,10 +125,17 @@ main() {
   local target="$PWD"
   local base="${AMOS_GIT_BASE:-git@github.com:amos-ie}"
 
-  local tool
-  for tool in git python3; do
-    command -v "$tool" >/dev/null || fail "$tool is required"
-  done
+  command -v git >/dev/null || fail "git is required"
+  case "$(uname -s 2>/dev/null)" in
+    MINGW* | MSYS* | CYGWIN*)
+      # Git Bash on Windows: python.org's installer gives py and python, not python3, and a
+      # python3 on the PATH may be the Microsoft Store stub. install.sh uses whichever runs.
+      python3 -c "" >/dev/null 2>&1 || py -3 -c "" >/dev/null 2>&1 ||
+        python -c "import sys; sys.exit(sys.version_info[0] != 3)" >/dev/null 2>&1 ||
+        fail "Python 3 is required: install it from python.org, then open a new Git Bash"
+      ;;
+    *) command -v python3 >/dev/null || fail "python3 is required" ;;
+  esac
   [ -d "$target" ] || fail "$target is not a folder. Create your amos/ folder first (mkdir -p ~/amos), then run setup in it."
   target="$(cd "$target" && pwd -P)"
   if [ "$target" = / ] || [ "$target" = "$(cd ~ && pwd -P)" ]; then

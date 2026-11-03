@@ -113,6 +113,39 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.store("symbolic-ref", "--short", "HEAD"), "main")
         self.assertEqual(self.store("rev-parse", "--abbrev-ref", "main@{upstream}"), "origin/main")
 
+    def fakes(self, uname, **commands):
+        """A folder of stand-in commands to put first on the PATH: uname -s says `uname`, and each
+        of commands (python3, py, python) runs the given sh body."""
+        folder = os.path.join(self.tmp.name, "fakes")
+        shutil.rmtree(folder, ignore_errors=True)
+        for name, body in {"uname": f'[ "$1" = -s ] && echo {uname} || exec {shutil.which("uname")} "$@"',
+                           **commands}.items():
+            write(folder, name, f"#!/bin/sh\n{body}\n")
+            os.chmod(os.path.join(folder, name), 0o755)
+        return {"PATH": folder + os.pathsep + os.environ["PATH"]}
+
+    def test_git_bash_on_windows_takes_py_or_python_when_python3_does_not_run(self):
+        stub = "exit 9009"  # the Microsoft Store's python3
+        for name, commands in (("py", {"python3": stub, "py": "exit 0"}),
+                               ("python", {"python3": stub, "py": "exit 1", "python": "exit 0"})):
+            with self.subTest(name):
+                result = self.setup(env=self.fakes("MINGW64_NT-10.0-19045", **commands))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("install ran in", result.stdout)
+                shutil.rmtree(os.path.join(self.amos, ".amos-workspace"))
+        result = self.setup(env=self.fakes("MINGW64_NT-10.0-19045", python3=stub, py="exit 1", python="exit 1"))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Python 3 is required: install it from python.org", result.stderr)
+
+    def test_python3_is_still_required_on_macos_and_linux(self):
+        # A PATH with py and python but no python3: they don't count outside Windows.
+        folder = self.fakes("Darwin", py="exit 0", python="exit 0")["PATH"].split(os.pathsep)[0]
+        for tool in ("git", "bash", "dirname", "mkdir", "rm", "mktemp"):
+            os.symlink(shutil.which(tool), os.path.join(folder, tool))
+        result = sh("bash", SETUP, cwd=self.amos, env={**self.env, "PATH": folder}, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("python3 is required", result.stderr)
+
     def test_runs_from_a_pipe(self):
         with open(SETUP) as script:
             result = sh("bash", "-s", cwd=self.amos, env=self.env, check=False, stdin=script)
