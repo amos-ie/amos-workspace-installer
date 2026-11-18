@@ -33,6 +33,8 @@ Open `amos/` in VS Code or Cursor and install the recommended extensions (Extens
 
 If the editor asks **"Allow automatic tasks?"**, choose Allow. From then on `install.sh` runs each time you open `amos/`, keeping the workspace up to date. If it never asks, or you chose Disallow, nothing is broken: update by hand with `bash .amos-workspace/scripts/install.sh`.
 
+**Using the Claude Code CLI instead?** Start `claude` in `amos/` (not inside one of the repos). `install.sh` then runs in the background each time it starts, and Claude tells you if it fails.
+
 ## If something goes wrong
 
 - **Could not clone:** check your network or VPN, and your GitHub SSH key (or, on HTTPS, that git has a GitHub token stored).
